@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
     while (1) {
 
         /* Output our prompt and get input */
-        char* input = readline("lispy> ");
+        char* input = readline("YUKI. N>");
 
         /* Add input to history */
         add_history(input);
