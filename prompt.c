@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
         add_history(input);
 
         /* Echo input back to user */
-        printf("No you're a %s\n", input);
+        printf("So you said %s\n", input);
 
         /* Free retrieved input */
         free(input);
