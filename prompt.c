@@ -36,12 +36,12 @@ enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
 /* Declare New lval Struct */
 typedef struct {
     int type;
-    long num;
+    double num;
     int err;
 } lval;
 
 /* Create a new number type lval */
-lval lval_num(long x) {
+lval lval_num(double x) {
     lval v;
     v.type = LVAL_NUM;
     v.num = x;
@@ -61,7 +61,7 @@ void lval_print(lval v) {
     switch (v.type) {
         /* In the case the type is a number print it */
         /* Then 'break' out of the switch. */
-        case LVAL_NUM: printf("%li", v.num);break;
+        case LVAL_NUM: printf("%g", v.num);break;
 
         /* In the case the type is an error */
         case LVAL_ERR:
@@ -101,10 +101,14 @@ lval eval_op(lval x, char* op, lval y) {
             : lval_num(x.num / y.num);
     }
     if (strcmp(op, "%") == 0) { 
+        /* If any operand is non integer return error */
+        if (rint(x.num) != x.num) { return lval_err(LERR_BAD_NUM); } 
+        if (rint(y.num) != y.num) { return lval_err(LERR_BAD_NUM); }
+
         /* If second operand is zero return error */
         return y.num == 0
             ? lval_err(LERR_DIV_ZERO)
-            : lval_num(x.num % y.num);
+            : lval_num((long)x.num % (long)y.num);
     }
     if (strcmp(op, "^") == 0) { return lval_num(pow(x.num, y.num)); }
     if (strcmp(op, "min") == 0) {
@@ -123,7 +127,7 @@ lval eval(mpc_ast_t* t) {
     if (strstr(t->tag, "number")) {
         /* Check if there is some error in conversion */
         errno = 0;
-        long x = strtol(t->contents, NULL, 10);
+        double x = strtod(t->contents, NULL);
         return errno != ERANGE ? lval_num(x) : lval_err(LERR_BAD_NUM);;
     }
 
