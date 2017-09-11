@@ -422,6 +422,19 @@ lval* builtin_cons(lval* a) {
     return x;
 }
 
+/* Define the len function to display length of Q-expression */
+lval* builtin_len(lval* a) {
+    /* Check whether the value passed is Q-expression */
+    LASSERT(a, a->count == 1,
+            "len passed too many arguments.");
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+            "len was not given a Q-expression.");
+
+    lval* x = lval_num(a->cell[0]->count);
+    lval_del(a);
+    return x;
+}
+
 /* Function to evaluate expressions based on symbol */
 lval* builtin(lval* a, char* func) {
    if (strcmp("list", func) == 0) { return builtin_list(a); }
@@ -430,6 +443,7 @@ lval* builtin(lval* a, char* func) {
    if (strcmp("join", func) == 0) { return builtin_join(a); }
    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
    if (strcmp("cons", func) == 0) { return builtin_cons(a); }
+   if (strcmp("len", func) == 0) { return builtin_len(a); }
    if (strstr("+-/*addmuldivminmaxsub^%",
                func)) { return builtin_op(a, func); }
    lval_del(a);
@@ -451,7 +465,7 @@ int main(int argc, char** argv) {
             number   : /-?[0-9]+(\\.[0-9]+)?/ ;\
             symbol : '+' | '-' | '*' | '/' | '%' | '^' | \"max\" | \"min\"\
                      | \"add\" | \"sub\" | \"mul\" | \"div\" \
-                     | \"list\" | \"head\" | \"tail\" \
+                     | \"list\" | \"head\" | \"tail\" | \"len\" \
                      | \"join\" | \"eval\" | \"cons\" ; \
             sexpr : '(' <expr>* ')' ; \
             qexpr : '{' <expr>* '}' ; \
