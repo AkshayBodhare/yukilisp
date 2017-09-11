@@ -397,6 +397,31 @@ lval* builtin_join(lval* a) {
     return x;
 }
 
+/* Append given value to the front of the given Q-expression */
+lval* builtin_cons(lval* a) {
+    /* Check whether the last expression is a Q-expression */
+    LASSERT(a, a->cell[a->count-1]->type == LVAL_QEXPR,
+            "Function 'cons' didn't detect Q-expression at end.");
+    /* Check if any passed values is an operator */
+    for (int i = 0; i < a->count; i++) {
+        LASSERT(a, a->cell[i]->type != LVAL_SYM,
+                "Cannot add a symbol to a Q-expression.");
+    }
+
+    lval* x = lval_pop(a, a->count-1);
+
+    while (a->count) {
+        x->count++;
+        x->cell = realloc(x->cell, sizeof(lval*) * x->count);
+        memmove(&x->cell[1], &x->cell[0], sizeof(lval*) *  (x->count-1));
+        x->cell[0] = lval_pop(a, a->count-1);
+        x->cell = realloc(x->cell, sizeof(lval*) * x->count);
+    }
+
+    lval_del(a);
+    return x;
+}
+
 /* Function to evaluate expressions based on symbol */
 lval* builtin(lval* a, char* func) {
    if (strcmp("list", func) == 0) { return builtin_list(a); }
@@ -404,6 +429,7 @@ lval* builtin(lval* a, char* func) {
    if (strcmp("tail", func) == 0) { return builtin_tail(a); }
    if (strcmp("join", func) == 0) { return builtin_join(a); }
    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
+   if (strcmp("cons", func) == 0) { return builtin_cons(a); }
    if (strstr("+-/*addmuldivminmaxsub^%",
                func)) { return builtin_op(a, func); }
    lval_del(a);
@@ -426,7 +452,7 @@ int main(int argc, char** argv) {
             symbol : '+' | '-' | '*' | '/' | '%' | '^' | \"max\" | \"min\"\
                      | \"add\" | \"sub\" | \"mul\" | \"div\" \
                      | \"list\" | \"head\" | \"tail\" \
-                     | \"join\" | \"eval\"; \
+                     | \"join\" | \"eval\" | \"cons\" ; \
             sexpr : '(' <expr>* ')' ; \
             qexpr : '{' <expr>* '}' ; \
             expr : <number> | <symbol> | <sexpr> | <qexpr> ; \
