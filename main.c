@@ -435,6 +435,19 @@ lval* builtin_len(lval* a) {
     return x;
 }
 
+/* Return Q-expression except for the last element */
+lval* builtin_init(lval* a) {
+    /* Check whether the value passed is Q-expression */
+    LASSERT(a, a->count == 1,
+            "init passed too many argument!");
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+            "init was not give a Q-expression!");
+
+    lval* x = lval_take(a, 0);
+    lval_del(lval_pop(x, x->count-1));
+    return x;
+}
+
 /* Function to evaluate expressions based on symbol */
 lval* builtin(lval* a, char* func) {
    if (strcmp("list", func) == 0) { return builtin_list(a); }
@@ -443,6 +456,7 @@ lval* builtin(lval* a, char* func) {
    if (strcmp("join", func) == 0) { return builtin_join(a); }
    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
    if (strcmp("cons", func) == 0) { return builtin_cons(a); }
+   if (strcmp("init", func) == 0) { return builtin_init(a); }
    if (strcmp("len", func) == 0) { return builtin_len(a); }
    if (strstr("+-/*addmuldivminmaxsub^%",
                func)) { return builtin_op(a, func); }
@@ -466,7 +480,7 @@ int main(int argc, char** argv) {
             symbol : '+' | '-' | '*' | '/' | '%' | '^' | \"max\" | \"min\"\
                      | \"add\" | \"sub\" | \"mul\" | \"div\" \
                      | \"list\" | \"head\" | \"tail\" | \"len\" \
-                     | \"join\" | \"eval\" | \"cons\" ; \
+                     | \"join\" | \"eval\" | \"cons\" | \"init\" ; \
             sexpr : '(' <expr>* ')' ; \
             qexpr : '{' <expr>* '}' ; \
             expr : <number> | <symbol> | <sexpr> | <qexpr> ; \
