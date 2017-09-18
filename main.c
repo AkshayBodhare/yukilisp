@@ -34,6 +34,20 @@ void add_history(char* unused) {}
         return err; \
     }
 
+#define LASSERT_TYPE(args, cond, fmt, ...) \
+    if (!(args->type == cond)) { \
+        lval* err = lval_err(fmt, ##__VA_ARGS__); \
+        lval_del(args); \
+        return err; \
+    }
+
+#define LASSERT_COUNT(args, cond, fmt, ...) \
+    if (!(args->count == cond)) { \
+        lval* err = lval_err(fmt, ##__VA_ARGS__); \
+        lval_del(args); \
+        return err; \
+    }
+
 /* Forward Declarations */
 
 struct lval;
@@ -63,11 +77,19 @@ typedef lval*(*lbuiltin)(lenv*, lval*);
 /* Declare New lval Struct */
 struct lval {
     int type;
+
+    /* Basic */
     double num;
     char* err;
     char* sym;
-    lbuiltin fun;
 
+    /* Function */
+    lbuiltin builtin;
+    lenv* env;
+    lval* formals;
+    lval* body;
+
+    /* Expression */
     int count;
     struct lval** cell;
 };
@@ -83,7 +105,7 @@ struct lenv {
 lval* lval_fun(lbuiltin func) {
     lval* v = malloc(sizeof(lval));
     v->type = LVAL_FUN;
-    v->fun = func;
+    v->builtin = func;
     return v;
 }
 
@@ -165,7 +187,13 @@ void lval_del(lval* v) {
             /* Also free the memory allocated to contain the pointers */
             free(v->cell);
             break;
-        case LVAL_FUN: break;
+        case LVAL_FUN:
+            if (!v->builtin) {
+                lenv_del(v->env);
+                lval_del(v->formals);
+                lval_del(v->body);
+            }
+            break;
     }
 
     /* Free the memory allocated for the "lval" struct itself */
@@ -181,7 +209,16 @@ lval* lval_copy(lval* v) {
     switch (v->type) {
 
         /* Copy Functions and Numbers Directly */
-        case LVAL_FUN: x->fun = v->fun; break;
+        case LVAL_FUN:
+            if (v->builtin) {
+                x->builtin = v->builtin;
+            } else {
+                x->builtin = NULL;
+                x->env = lenv_copy(v->env);
+                x->formals = lval_copy(v->formals);
+                x->body = lval_copy(v->body);
+            }
+            break;
         case LVAL_NUM: x->num = v->num; break;
 
         /* Copy Strings using malloc and strcpy */
@@ -290,6 +327,23 @@ void lenv_put(lenv* e, lval* k, lval* v) {
     strcpy(e->syms[e->count-1], k->sym);
 }
 
+/* Create a user defined function */
+lval* lval_lambda(lval* formals, lval* body) {
+    lval* v = malloc(sizeof(lval));
+    v->type = LVAL_FUN;
+
+    /* Set Builtin to Null */
+    v->builtin = NULL;
+
+    /* Build new environment */
+    v->env = lenv_new();
+
+    /* Set Formals and Body */
+    v->formals = formals;
+    v->body = body;
+    return v;
+}
+
 /* Convert number from string to double */
 lval* lval_read_num(mpc_ast_t* t) {
     errno = 0;
@@ -342,7 +396,14 @@ void lval_print(lval* v) {
         case LVAL_SYM: printf("%s", v->sym); break;
         case LVAL_SEXPR: lval_expr_print(v, '(', ')'); break;
         case LVAL_QEXPR: lval_expr_print(v, '{', '}'); break;
-        case LVAL_FUN: printf("<function>"); break;
+        case LVAL_FUN:
+            if (v->builtin) {
+            printf("<builtin>");
+            } else {
+             printf("(\\ "); lval_print(v->formals);
+             putchar(' '); lval_print(v->body); putchar(')');
+            }
+            break;
     }
 }
 
@@ -429,15 +490,15 @@ lval* builtin_op(lenv* e, lval* a, char* op) {
 /* The head function for Q-expressions */
 lval* builtin_head(lenv* e, lval* a) {
     /* Check Error Conditions */
-    LASSERT(a, a->count == 1,
-            "Function 'head' too many arguments!"
+    LASSERT_COUNT(a, 1,
+            "Function 'head' too many arguments! "
             "Got %i, Expected %i",
             a->count, 1);
-    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+    LASSERT_TYPE(a->cell[0], LVAL_QEXPR,
             "Function 'head' passed incorrect type for argument 0. "
             "Got %s, Expected %s.",
             ltype_name(a->cell[0]->type), ltype_name(LVAL_QEXPR));
-    LASSERT(a, a->cell[0]->count != 0,
+    LASSERT(a->cell[0], a->cell[0]->count != 0,
             "Function 'head' passed {}!");
 
     /* Otherwise take first argument */
@@ -510,7 +571,7 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
     }
 
     /* If so call function to get result */
-    lval* result = f->fun(e, v);
+    lval* result = f->builtin(e, v);
     lval_del(f);
     return result;
 }
