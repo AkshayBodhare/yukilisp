@@ -57,8 +57,18 @@ struct lenv;
 typedef struct lval lval;
 typedef struct lenv lenv;
 
+/* Parser Declarations */
+mpc_parser_t* Number;
+mpc_parser_t* Symbol;
+mpc_parser_t* String;
+mpc_parser_t* Comment;
+mpc_parser_t* Sexpr;
+mpc_parser_t* Qexpr;
+mpc_parser_t* Expr;
+mpc_parser_t* Yuki;
+
 /* Create Enumeration of Possible lval Types */
-enum { LVAL_ERR, LVAL_NUM, LVAL_SYM,
+enum { LVAL_ERR, LVAL_NUM, LVAL_SYM, LVAL_STR,
        LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR };
 
 char* ltype_name(int t) {
@@ -69,6 +79,7 @@ char* ltype_name(int t) {
         case LVAL_SYM: return "Symbol";
         case LVAL_SEXPR: return "S-Expression";
         case LVAL_QEXPR: return "Q-Expression";
+        case LVAL_STR: return "String";
         default: return "Unknown";
     }
 }
@@ -84,6 +95,7 @@ struct lval {
     double num;
     char* err;
     char* sym;
+    char* str;
 
     /* Function */
     lbuiltin builtin;
@@ -144,6 +156,15 @@ lval* lval_err(char* fmt, ...) {
     return v;
 }
 
+/* Construct a string lval */
+lval* lval_str(char* s) {
+    lval* v = malloc(sizeof(lval));
+    v->type = LVAL_STR;
+    v->str = malloc(strlen(s) + 1);
+    strcpy(v->str, s);
+    return v;
+}
+
 /* Construct a pointer to a new Symbol lval */
 lval* lval_sym(char* s) {
     lval* v = malloc(sizeof(lval));
@@ -200,6 +221,7 @@ void lval_del(lval* v) {
                 lval_del(v->body);
             }
             break;
+        case LVAL_STR: free(v->str); break;
     }
 
     /* Free the memory allocated for the "lval" struct itself */
@@ -243,6 +265,8 @@ lval* lval_copy(lval* v) {
                            x->cell[i] = lval_copy(v->cell[i]);
                        }
                        break;
+        case LVAL_STR: x->str = malloc(strlen(v->str) + 1);
+                       strcpy(x->str, v->str); break;
     }
 
     return x;
@@ -407,6 +431,22 @@ lval* lval_read_num(mpc_ast_t* t) {
     return errno != ERANGE ? lval_num(x) : lval_err("invalid number");
 }
 
+/* Convert string in escaped form to lval */
+lval* lval_read_str(mpc_ast_t* t) {
+    /* Cut off the final quote character */
+    t->contents[strlen(t->contents)-1] = '\0';
+    /* Copy the string missing out the first quote character */
+    char* unescaped = malloc(strlen(t->contents+1)+1);
+    strcpy(unescaped, t->contents+1);
+    /* Pass through the unescape function */
+    unescaped = mpcf_unescape(unescaped);
+    /* Construct a new lval using the string */
+    lval* str = lval_str(unescaped);
+    /* Free the string and return */
+    free(unescaped);
+    return str;
+}
+
 /* Add another lval value to the cell field */
 lval* lval_add(lval* v, lval* x) {
     v->count++;
@@ -418,9 +458,10 @@ lval* lval_add(lval* v, lval* x) {
 /* Convert parsed tree structure completely into an lval */
 lval* lval_read(mpc_ast_t* t) {
 
-    /* If Symbol or Number return conversion to that type */
+    /* If Symbol, String or Number return conversion to that type */
     if (strstr(t->tag, "number")) { return lval_read_num(t); }
     if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
+    if (strstr(t->tag, "string")) { return lval_read_str(t); }
 
     /* If root (>) or sexpr then create empty list */
     lval* x = NULL;
@@ -435,6 +476,7 @@ lval* lval_read(mpc_ast_t* t) {
         if (strcmp(t->children[i]->contents, "{") == 0) { continue; }
         if (strcmp(t->children[i]->contents, "}") == 0) { continue; }
         if (strcmp(t->children[i]->tag, "regex") == 0) { continue; }
+        if (strstr(t->children[i]->tag, "comment")) { continue; }
         x = lval_add(x, lval_read(t->children[i]));
     }
 
@@ -443,6 +485,18 @@ lval* lval_read(mpc_ast_t* t) {
 
 /* Declaration for lval_expr_print */
 void lval_expr_print(lval* v, char open, char close);
+
+void lval_print_str(lval* v) {
+    /* Make a Copy of the String */
+    char* escaped = malloc(strlen(v->str)+1);
+    strcpy(escaped, v->str);
+    /* Pass it through the escape function */
+    escaped = mpcf_escape(escaped);
+    /* Print it between " characters */
+    printf("\"%s\"", escaped);
+    /* free the copied string */
+    free(escaped);
+}
 
 /* Print the lval as it is */
 void lval_print(lval* v) {
@@ -460,6 +514,7 @@ void lval_print(lval* v) {
              putchar(' '); lval_print(v->body); putchar(')');
             }
             break;
+        case LVAL_STR: lval_print_str(v); break;
     }
 }
 
@@ -796,7 +851,7 @@ lval* builtin_var(lenv* e, lval* a, char* func) {
             lenv_put(e, syms->cell[i], a->cell[i+1]);
         }
     }
-    
+
     lval_del(a);
     return lval_sexpr();
 }
@@ -831,7 +886,7 @@ lval* lval_call(lenv* e, lval* f, lval*a) {
 
         /* Pop the first symbol from the formals */
         lval* sym = lval_pop(f->formals, 0);
-        
+
         /* Special case to deal with '&' */
         if (strcmp(sym->sym, "&") == 0) {
 
@@ -973,6 +1028,7 @@ int lval_eq(lval* x, lval* y) {
                        /* Otherwise lists must be equal */
                        return 1;
                        break;
+        case LVAL_STR: return (strcmp(x->str, y->str) == 0);
     }
     return 0;
 }
@@ -1022,6 +1078,74 @@ lval* builtin_if(lenv* e, lval* a) {
     return x;
 }
 
+lval* builtin_load(lenv* e, lval* a) {
+    LASSERT_NUM("load", a, 1);
+    LASSERT_TYPE("load", a, 0, LVAL_STR);
+
+    /* Parse File given by string name */
+    mpc_result_t r;
+    if (mpc_parse_contents(a->cell[0]->str, Yuki, &r)) {
+
+        /* Read contents */
+        lval* expr = lval_read(r.output);
+        mpc_ast_delete(r.output);
+
+        /* Evaluate each Expression */
+        while (expr->count) {
+            lval* x = lval_eval(e, lval_pop(expr, 0));
+            /* If Evaluation leads to error print it */
+            if (x->type == LVAL_ERR) { lval_println(x); }
+            lval_del(x);
+        }
+
+        /* Delete expressions and arguments */
+        lval_del(expr);
+        lval_del(a);
+
+        /* Return empty list */
+        return lval_sexpr();
+
+    } else {
+        /* Get Parse Error as String */
+        char* err_msg = mpc_err_string(r.error);
+        mpc_err_delete(r.error);
+
+        /* Create new error message using it */
+        lval* err = lval_err("Could not load Library %s", err_msg);
+        free(err_msg);
+        lval_del(a);
+
+        /* Cleanup and return error */
+        return err;
+    }
+}
+
+lval* builtin_print(lenv* e, lval* a) {
+
+    /* Print each argument followed by a space */
+    for (int i = 0; i < a->count; i++) {
+        lval_print(a->cell[i]); putchar(' ');
+    }
+
+    /* Print a newline and delete arguments */
+    putchar('\n');
+    lval_del(a);
+
+    return lval_sexpr();
+}
+
+lval* builtin_error(lenv* e, lval* a) {
+    LASSERT_NUM("error", a, 1);
+    LASSERT_TYPE("error", a, 0, LVAL_STR);
+
+    /* Construct Error from first argument */
+    lval* err = lval_err(a->cell[0]->str);
+
+    /* Delete arguments and return */
+    lval_del(a);
+    return err;
+}
+
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
     lval* k = lval_sym(name);
     lval* v = lval_fun(func);
@@ -1063,17 +1187,23 @@ void lenv_add_builtins(lenv* e) {
     lenv_add_builtin(e, "<", builtin_lt);
     lenv_add_builtin(e, ">=", builtin_ge);
     lenv_add_builtin(e, "<=", builtin_le);
+
+    /* String Functions */
+    lenv_add_builtin(e, "load", builtin_load);
+    lenv_add_builtin(e, "error", builtin_error);
+    lenv_add_builtin(e, "print", builtin_print);
 }
 
 int main(int argc, char** argv) {
     /* Create Some Parsers */
-    mpc_parser_t* Number = mpc_new("number");
-    mpc_parser_t* Symbol = mpc_new("symbol");
-    mpc_parser_t* Sexpr = mpc_new("sexpr");
-    mpc_parser_t* Qexpr = mpc_new("qexpr");
-    mpc_parser_t* Expr = mpc_new("expr");
-    mpc_parser_t* Yuki = mpc_new("yuki");
-
+    Number = mpc_new("number");
+    Symbol = mpc_new("symbol");
+    Sexpr = mpc_new("sexpr");
+    Qexpr = mpc_new("qexpr");
+    Expr = mpc_new("expr");
+    Yuki = mpc_new("yuki");
+    String = mpc_new("string");
+    Comment = mpc_new("comment");
     /* Define them with the following Language */
     mpca_lang(MPCA_LANG_DEFAULT,
             "\
@@ -1081,50 +1211,73 @@ int main(int argc, char** argv) {
             symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&%]+/ ;\
             sexpr : '(' <expr>* ')' ; \
             qexpr : '{' <expr>* '}' ; \
-            expr : <number> | <symbol> | <sexpr> | <qexpr> ; \
+            string : /\"(\\\\.|[^\"])*\"/ ; \
+            comment : /;[^\\r\\n]*/ ; \
+            expr : <number> | <symbol> | <sexpr> | <qexpr> \
+                 | <string> | <comment> ; \
             yuki     : /^/ <expr>* /$/ ;\
             ",
-            Number, Symbol, Sexpr, Qexpr, Expr, Yuki);
-
-    /* Print Version and Exit Information */
-    puts("YUKI Version 0.0.0.0.4");
-    puts("Press Ctrl+c to Exit\n");
+              Number, Symbol, Sexpr, Qexpr, String, Comment, Expr, Yuki);
 
     lenv* e = lenv_new();
     lenv_add_builtins(e);
 
-    /* In a never ending loop */
-    while (1) {
+    /* Supplied with a list of files */
+    if (argc >= 2) {
 
-        /* Output our prompt and get input */
-        char* input = readline("YUKI. N>");
+        /* loop over each supplied filename (starting from 1) */
+        for (int i = 1; i < argc; i++) {
 
-        /* Add input to history */
-        add_history(input);
+            /* Argument list with a single argument, the filename */
+            lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
 
-        /* Attempt to Parse the user Input */
-        mpc_result_t r;
-        if (mpc_parse("<stdin>", input, Yuki, &r)) {
+            /* Pass to builtin load and get the result */
+            lval* x = builtin_load(e, args);
 
-            /* Evaluate and print the input */
-            lval* x = lval_eval(e, lval_read(r.output));
-            lval_println(x);
+            /* If the result is an error be sure to print it */
+            if (x->type == LVAL_ERR) { lval_println(x); }
             lval_del(x);
-            mpc_ast_delete(r.output);
-
-        } else {
-            /* Otherwise Print the Error */
-            mpc_err_print(r.error);
-            mpc_err_delete(r.error);
         }
-        /* Free retrieved input */
-        free(input);
+    }
+
+    if (argc == 1) {
+        /* Print Version and Exit Information */
+        puts("YUKI Version 0.0.0.1.0");
+        puts("Press Ctrl+c to Exit\n");
+
+        /* In a never ending loop */
+        while (1) {
+
+            /* Output our prompt and get input */
+            char* input = readline("YUKI. N> ");
+
+            /* Add input to history */
+            add_history(input);
+
+            /* Attempt to Parse the user Input */
+            mpc_result_t r;
+            if (mpc_parse("<stdin>", input, Yuki, &r)) {
+
+                /* Evaluate and print the input */
+                lval* x = lval_eval(e, lval_read(r.output));
+                lval_println(x);
+                lval_del(x);
+                mpc_ast_delete(r.output);
+
+            } else {
+                /* Otherwise Print the Error */
+                mpc_err_print(r.error);
+                mpc_err_delete(r.error);
+            }
+            /* Free retrieved input */
+            free(input);
+        }
     }
 
     lenv_del(e);
 
     /* Undefine and Delete our Parsers */
-    mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr, Expr, Yuki);
+    mpc_cleanup(8, Number, Symbol, Sexpr, Qexpr, String, Comment, Expr, Yuki);
 
     return 0;
 }
