@@ -1222,6 +1222,12 @@ int main(int argc, char** argv) {
     lenv* e = lenv_new();
     lenv_add_builtins(e);
 
+    /* Load the standard Library into the Environment */
+    lval* stl = lval_add(lval_sexpr(), lval_str("prelude.lspy"));
+    lval* x = builtin_load(e, stl);
+    if (x->type == LVAL_ERR) { lval_println(x); }
+    lval_del(x);
+
     /* Supplied with a list of files */
     if (argc >= 2) {
 
