@@ -154,3 +154,10 @@
     { (== n 1) 1 }
     { otherwise (+ (fib (- n 1)) (fib (- n 2))) }
 })
+
+; Range
+(fun {range n} {
+  if (== n 0)
+    {{0}}
+    {join (range (- n 1)) (list n)}
+})
